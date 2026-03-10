@@ -1,0 +1,20 @@
+[package]
+name = "rust-musl-libc-compat-test"
+version = "0.1.0"
+edition = "2024"
+description = "Kernel ABI compatibility test suite for musl static binaries"
+
+[[bin]]
+name = "musl-compat-test"
+path = "src/main.rs"
+
+[dependencies]
+libc = "0.2"
+
+[profile.release]
+opt-level     = 3
+lto           = true      # important for static binary size
+codegen-units = 1
+strip         = "symbols" # smaller binary, easier to scp around
+panic         = "abort"   # musl + unwind is possible but adds complexity;
+                          # abort is simpler and appropriate for a test tool
