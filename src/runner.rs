@@ -21,7 +21,7 @@ enum Outcome {
 }
 
 /// Run all registered tests against `kernel`, print results, return exit code.
-pub fn run_all(tests: &[Test], kernel: &KernelVersion) -> i32 {
+pub fn run_all(tests: &[Test], kernel: &KernelVersion, build: &crate::BuildInfo) -> i32 {
     let mac = MacFramework::detect();
 
     println!("=== musl ABI compatibility test ===");
@@ -29,6 +29,8 @@ pub fn run_all(tests: &[Test], kernel: &KernelVersion) -> i32 {
     println!("arch     : {}", std::env::consts::ARCH);
     println!("security : {}", mac.summary());
     println!("uid      : {}", unsafe { libc::getuid() });
+    println!("rustc    : {}", build.rustc_version);
+    println!("musl libc: {}", build.musl_libc_version);
 
     // Warn about exec-from-tmp before anything else
     if let Some(warn) = check_exec_location() {

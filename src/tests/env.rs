@@ -1,12 +1,16 @@
 use std::env;
 
 pub fn round_trip() -> Result<(), String> {
-    env::set_var("MUSL_TEST_KEY", "musl_test_value");
-    let v = env::var("MUSL_TEST_KEY").map_err(|e| e.to_string())?;
+    // SAFETY: test binary is single-threaded at this point, no other thread
+    // is reading the environment concurrently.
+    unsafe { std::env::set_var("MUSL_TEST_KEY", "musl_test_value") };
+
+    let v = std::env::var("MUSL_TEST_KEY").map_err(|e| e.to_string())?;
     if v != "musl_test_value" {
         return Err(format!("expected 'musl_test_value', got '{}'", v));
     }
-    env::remove_var("MUSL_TEST_KEY");
+
+    unsafe { std::env::remove_var("MUSL_TEST_KEY") };
     Ok(())
 }
 

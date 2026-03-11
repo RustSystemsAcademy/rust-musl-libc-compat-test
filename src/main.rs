@@ -1,3 +1,5 @@
+/// src/main.rs
+///
 mod kernel;
 mod runner;
 mod security;
