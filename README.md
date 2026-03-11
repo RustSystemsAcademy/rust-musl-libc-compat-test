@@ -21,6 +21,55 @@ scp target/x86_64-unknown-linux-musl/release/musl-compat-test user@suse12host:/t
 
 ```
 
+## Expected Output
+```
+=== musl ABI compatibility test ===
+kernel   : 5.15.167
+arch     : x86_64
+security : none detected
+uid      : 1000
+rustc    : rustc 1.91.1 (ed61e7d7e 2025-11-07)
+musl libc: bundled in Rust sysroot (/home/user/.rustup/toolchains/stable-x86_64-unknown-linux-gnu)
+
+  PASS  env: set/get round-trip
+  PASS  env: iterate environment
+  PASS  fs: create / write / read
+  PASS  fs: symlink creation
+  PASS  fs: directory traversal
+  PASS  thread: spawn + join
+  PASS  thread: TLS isolation
+  PASS  thread: barrier sync
+  PASS  net: TCP loopback
+  PASS  time: monotonic clock
+  PASS  time: CLOCK_BOOTTIME
+  PASS  proc: PID / /proc/self/exe
+  PASS  syscall: getrandom(2)
+  PASS  syscall: memfd_create(2)
+  PASS  syscall: renameat2(2)
+
+results: 15 passed, 0 skipped, 0 failed
+```
+This is a clean, fully successful run. Here's what each part tells you:
+**The header:**
+
+- `kernel 5.15.167` — WSL2's Microsoft kernel. Modern enough that nothing gets skipped.  
+- `security: none detected` — WSL2 doesn't run SELinux or AppArmor, so no MAC framework is active. Expected.  
+- `uid: 1000` — running as a normal user, not root. Confirms none of the tests need elevated privileges.  
+- `rustc 1.91.1` — the toolchain version that produced this binary. This is now baked into the artifact permanently.  
+- `musl libc: bundled in Rust sysroot` — confirms musl came from inside the Rust toolchain, not the system. The sysroot path shown is on your build machine — this string is frozen into the binary at compile time, so it will show that same build host path when you run it on a test host, which is correct and useful for provenance.  
+
+**The test results:**
+- All 15 tests passed with zero skipped. On WSL2's 5.15 kernel all three kernel-gated syscalls (`getrandom`, `memfd_create`, `renameat2`) ran because 5.15 is well above all the thresholds (3.15 and 3.17).  
+
+**What to expect when you run this same binary on an older Linux host such as SUSE 12:**
+
+- The header will show kernel: 3.12.x instead
+- The three kernel-gated tests will show `SKIP` instead of PASS
+- Everything else should show `PASS`
+- `results` will read something like `12 passed, 3 skipped, 0 failed`
+
+That skip/pass pattern on SUSE 12 is the success condition — it means the binary is working correctly and the kernel gating is doing exactly what it was designed to do. A `FAIL` on SUSE 12 would be the signal that something unexpected is wrong.
+
 ## Architecture  
 The separation of concerns is: `kernel.rs` knows nothing about tests, `runner.rs` knows nothing about what the tests do, each test module is completely self-contained, and `tests/mod.rs` is the only place that wires the requirements (kernel gates) to the implementations. Adding a new test means adding a function in the appropriate module and one line in `tests/mod.rs`.  
 
