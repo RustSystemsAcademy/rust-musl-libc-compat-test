@@ -95,6 +95,48 @@ Linux functionality actually being tested:
 Why it matters for this project:
 It expands concurrency coverage from “threads exist” to “threads can block and be woken correctly,” which is a more meaningful runtime check.
 
+### `fs: unix domain socket pair`
+
+Why add it:
+The suite currently covers TCP loopback and regular filesystem operations, but not local IPC through Unix sockets. This is a common Linux primitive used by many real-world tools and exercises a different path than TCP.
+
+Linux functionality actually being tested:
+- `socketpair` or `AF_UNIX` socket creation
+- local bidirectional stream semantics without the IP stack
+- file descriptor passing readiness, if extended later
+- libc wrappers around Unix-domain socket I/O
+
+Why it matters for this project:
+It broadens local IPC coverage and helps distinguish “network stack works” from “general socket and descriptor behavior works.”
+
+### `proc: signal handling round-trip`
+
+Why add it:
+The current suite does not exercise signal delivery at all. A small self-signal test using `SIGUSR1` would validate a core Unix runtime behavior without requiring privileges.
+
+Linux functionality actually being tested:
+- `sigaction`
+- signal mask and handler installation
+- signal delivery to the current process or thread
+- libc signal trampoline behavior
+
+Why it matters for this project:
+Signals are foundational Unix behavior and are often involved in supervisor shutdown, timeouts, and diagnostics. A static binary that mishandles them is not fully trustworthy.
+
+### `fs: metadata and permissions sanity`
+
+Why add it:
+The suite verifies file contents, but not ownership and mode bit handling. A basic chmod/stat round-trip would validate another layer of libc and VFS behavior.
+
+Linux functionality actually being tested:
+- `stat`/`fstat`
+- `chmod`
+- Unix permission bits and metadata reporting
+- libc path-to-metadata translation
+
+Why it matters for this project:
+This is a cheap way to validate file metadata correctness, which matters for packaging, temp files, and execution behavior on target hosts.
+
 ## Fixes To Make First
 
 ### Fix the incorrect monotonic clock test
@@ -113,3 +155,98 @@ Linux functionality actually being tested after the fix:
 
 Why it matters for this project:
 Right now the test name overstates what is being validated. Fixing it keeps the suite technically honest and avoids reporting false coverage.
+
+### Fix temporary path collisions and cleanup robustness
+
+Problem:
+Several tests use stable names under `/tmp`, such as `musl_compat_rw` and `musl_renameat2`. That makes reruns and concurrent runs vulnerable to collisions or leftover files after a crash.
+
+What to change:
+- Generate unique per-run temp directories using PID, timestamp, randomness, or `mkdtemp`-style logic
+- Centralize temp resource creation and cleanup
+- Make cleanup best-effort on failure paths so one broken run does not poison the next
+
+Linux functionality actually being tested after the fix:
+- The same filesystem behaviors as today, but without false failures caused by reused pathnames
+- Crash-safe cleanup expectations for temp resources
+
+Why it matters for this project:
+This improves determinism. A compatibility suite should fail because the host is incompatible, not because a previous run left stale files behind.
+
+### Improve syscall error reporting to include `errno`
+
+Problem:
+The direct syscall tests currently report raw negative returns such as `renameat2 returned -1`, which is not enough to diagnose whether the failure was expected policy denial, missing kernel support, or a genuine bug.
+
+What to change:
+- Capture and report `std::io::Error::last_os_error()` after failing syscalls
+- Include the symbolic context in error messages where practical, for example `EPERM`, `ENOSYS`, or `EINVAL`
+
+Linux functionality actually being tested after the fix:
+- The same syscall paths as today, but with errors mapped to real Linux failure modes
+
+Why it matters for this project:
+This turns the suite from “pass/fail” into a usable diagnostics tool when something breaks on an older or more restricted host.
+
+## Broader Improvements
+
+### Add machine-readable output mode
+
+What to add:
+- A `--json` flag or similar output mode
+- Structured per-test fields for `name`, `status`, `reason`, `kernel_gate`, and `error`
+- Structured build and host metadata in the header section
+
+Why it matters:
+Right now the output is human-readable only. JSON would make it much easier to archive results from multiple hosts and compare behavior across kernels or distributions.
+
+### Add per-test timeouts or hang protection
+
+What to add:
+- A small timeout mechanism around tests that could block on I/O or synchronization
+- A clear `TIMEOUT` or `FAIL` mode distinct from ordinary assertion failures
+
+Why it matters:
+Compatibility probes should fail fast. If a target host wedges on one primitive, the suite should still produce actionable output instead of hanging indefinitely.
+
+Linux functionality actually being protected:
+- Blocking socket operations
+- synchronization waits
+- child process execution paths
+
+### Add a focused self-check CLI mode
+
+What to add:
+- A hidden or documented `--self-check` mode intended only for the suite's own `fork/exec self` test
+- Minimal output and deterministic exit codes
+
+Why it matters:
+This makes the process execution test cleaner than reusing the human-facing main output path, and it provides a stable target for future smoke tests.
+
+### Expand unit tests for non-runtime parsing and detection logic
+
+What to add:
+- More unit tests for kernel version parsing in `kernel.rs`
+- Unit tests for security-context parsing in `security.rs`
+- Unit tests for test registry invariants, such as all names being unique and kernel-gated tests having reasons
+
+Why it matters:
+Not every regression requires a target Linux host to catch. The parsing and wiring code should be protected by fast local tests.
+
+### Add CI checks for static-linkage invariants
+
+What to add:
+- A CI job that builds the musl target and verifies `ldd`, `file`, and `readelf -d` expectations
+- A check that the binary still reports the expected build metadata fields
+
+Why it matters:
+This project’s central claim is “static musl binary with predictable behavior.” Static-linkage regressions should be caught automatically before anyone copies an artifact to a test host.
+
+### Improve documentation around expected skip behavior
+
+What to add:
+- A matrix showing which tests are expected to `PASS`, `SKIP`, or potentially `SKIP (security)` on older kernels and under confined MAC contexts
+- A short section distinguishing unsupported-kernel skips from true failures
+
+Why it matters:
+The suite already has gating logic, but the operator guidance still lives mostly in prose. A compact matrix would make interpreting results faster and less error-prone.
