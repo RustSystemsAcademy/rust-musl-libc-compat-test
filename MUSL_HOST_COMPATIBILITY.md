@@ -38,6 +38,32 @@ Use this checklist before you call a musl build portable across hosts:
 - Test under different security contexts and mount layouts.
 - Be explicit about runtime file dependencies like certs, tzdata, and resolver config.
 
+## Minimum host checks
+
+Run these on the target host before you trust the result:
+
+```bash
+uname -r
+cat /etc/os-release
+mount
+getenforce 2>/dev/null || true
+aa-status 2>/dev/null || true
+file ./your-binary
+ldd ./your-binary
+readelf -d ./your-binary | grep NEEDED || true
+```
+
+What these checks tell you:
+
+- `uname -r`: the kernel version you are actually testing against
+- `cat /etc/os-release`: the distro family and release
+- `mount`: whether `noexec`, overlay, or other mount flags may affect behavior
+- `getenforce`: whether SELinux is enforcing
+- `aa-status`: whether AppArmor is active
+- `file`: whether the binary is actually statically linked for the expected target
+- `ldd`: whether the binary is unexpectedly dynamic
+- `readelf -d | grep NEEDED`: whether any dynamic dependencies leaked into the build
+
 ## Pre-flight review
 
 Before shipping to another host, review these areas:
@@ -61,6 +87,62 @@ Before shipping to another host, review these areas:
 - TLS connections can find and use the expected CA bundle.
 - Filesystem behavior matches assumptions around temp files, mounts, and permissions.
 - Signals, threads, and process execution paths behave correctly for your workload.
+
+## Runtime dependency checklist
+
+Even a static musl binary may still depend on host files and services. Check these explicitly:
+
+- `/etc/resolv.conf`: required for DNS resolution
+- `/etc/hosts`: required if you expect `localhost` or local overrides to resolve correctly
+- `/etc/passwd`: required if your application resolves users or home directories
+- `/etc/group`: required if your application resolves group information
+- CA bundle path: required for outbound HTTPS or TLS peer verification
+- timezone data: required if your application depends on local time zones rather than UTC only
+- `/proc`: required if your application reads process, memory, mount, or kernel metadata
+- `/sys`: required if your application reads device, kernel, or security state from sysfs
+
+## Common failure signatures
+
+Watch for these patterns when validating across hosts:
+
+- `ENOSYS`: the kernel is too old for the syscall or feature being used
+- `EPERM`: the syscall exists but security policy or container restrictions blocked it
+- `EINVAL`: the syscall exists, but flags or semantics differ from what the application expected
+- `ENOENT`: a runtime file dependency is missing, or a path assumption is wrong
+- certificate verification failures: the CA bundle is missing, misplaced, or different from what the application expects
+- DNS resolution failures: the resolver configuration, `/etc/hosts`, or libc behavior is not matching the application’s assumptions
+- execution denied from `/tmp`: mount flags or SELinux labeling prevent running the binary from that location
+
+## Do not assume
+
+- Do not assume musl makes the binary compatible with every Linux kernel.
+- Do not assume glibc-style NSS behavior will exist on the target host.
+- Do not assume plugin loading or `dlopen`-based ecosystems will work with a fully static binary.
+- Do not assume locale behavior will match glibc.
+- Do not assume `/tmp` is executable.
+- Do not assume the target CPU supports the same instruction set as the build machine.
+
+## Suggested test matrix
+
+Validate the application in more than one environment:
+
+- build host: confirms the binary at least works where it was produced
+- oldest supported kernel: confirms your real minimum compatibility target
+- SELinux host: confirms policy does not break startup or required syscalls
+- AppArmor host: confirms confinement or profile state does not change behavior unexpectedly
+- containerized host: confirms seccomp, mount layout, and namespace constraints do not break the application
+
+## Release checklist
+
+Before calling the build ready for distribution:
+
+- Confirm the binary is statically linked.
+- Confirm no unexpected dynamic dependencies appear in the ELF metadata.
+- Run the application on the oldest supported kernel.
+- Run the application on at least one host with a security framework enabled.
+- Verify expected degraded behavior on older or more restricted hosts.
+- Verify runtime dependencies like cert bundles, resolver config, and timezone data.
+- Verify the binary is placed in an executable location on the target host.
 
 ## Decision standard
 
